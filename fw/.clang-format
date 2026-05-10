@@ -1,0 +1,7 @@
+Language: Cpp
+BasedOnStyle: Google
+InsertNewlineAtEOF: true
+BreakBeforeBraces: Attach
+InsertBraces: true
+ColumnLimit: 120
+TabWidth: 4
