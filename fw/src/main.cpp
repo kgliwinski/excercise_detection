@@ -1,31 +1,36 @@
 #include <Arduino.h>
-#include <LSM9DS1.h>
+#include "IMU_ext.h"
 
-LSM9DS1Class* sensor;
+ImuExtension IMUExt(IMU);
+
 void setup() {
-  Serial.println("Initializing sensor...");
-
-  sensor = new LSM9DS1Class(Wire1);
-  if (!sensor->begin()) {
-    Serial.println("Failed to initialize sensor!");
-    while (1);
-  } else {
-    Serial.println("Sensor initialized successfully.");
-  }
-  sensor->setContinuousMode();
+  Serial.begin(115200);
+  delay(1000);
+  IMUExt.begin();
 }
 
 void loop() {
   delay(500);
-  while(sensor->accelerationAvailable()) {
-    float x, y, z;
-    if (sensor->readAcceleration(x, y, z)) {
-      Serial.print("Acceleration: ");
-      Serial.print(x);
-      Serial.print(", ");
-      Serial.print(y);
-      Serial.print(", ");
-      Serial.println(z);
-    }
+  auto [accelData, gyroData] = IMUExt.getFullData();
+  Serial.println("Accel samples: ");
+  Serial.print(accelData.samples.size());
+  for(const auto& sample : accelData.samples){
+    Serial.print(" | x: ");
+    Serial.print(sample.x);
+    Serial.print(" y: ");
+    Serial.print(sample.y);
+    Serial.print(" z: ");
+    Serial.println(sample.z);
   }
+  Serial.println("Gyro samples: ");
+  Serial.println(gyroData.samples.size());
+  for(const auto& sample : gyroData.samples){
+    Serial.print(" | x: ");
+    Serial.print(sample.x);
+    Serial.print(" y: ");
+    Serial.print(sample.y);
+    Serial.print(" z: ");
+    Serial.println(sample.z);
+  }
+  Serial.println();
 }
