@@ -5,7 +5,7 @@ import pandas as pd
 import tensorflow as tf
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Conv1D, MaxPooling1D, Flatten, Dense, Dropout
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import classification_report, confusion_matrix
@@ -59,29 +59,34 @@ for label_idx, folder_name in enumerate(sorted(os.listdir(DATA_DIR))):
         X_data.append(sensor_data)
         y_labels.append(label_idx)
 
+# ... (End of Step 2 data loading) ...
 X = np.array(X_data, dtype=np.float32)
+
+# ---> NEW LINE: Expand dimensions for Conv2D <---
+X = np.expand_dims(X, axis=2) 
+
 y = np.array(y_labels, dtype=np.int32)
 NUM_CLASSES = len(label_map)
 
-print(f"\nFinal Input Shape: {X.shape} (Samples, Timesteps, Features)")
+print(f"\nFinal Input Shape: {X.shape} (Samples, Height, Width, Channels)")
 print(f"Classes Found: {label_map}")
 
 # Split into Train and Test sets
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
 
+
 # ==========================================
-# 3. Define the Tiny 1D-CNN
+# 3. Define the Tiny 2D-CNN (Acting as a 1D-CNN)
 # ==========================================
-# This architecture is intentionally small to fit on an MCU
 model = Sequential([
     # First Convolutional Block
-    Conv1D(filters=16, kernel_size=3, activation='relu', input_shape=(MAX_TIMESTEPS, NUM_FEATURES)),
-    MaxPooling1D(pool_size=2),
+    Conv2D(filters=16, kernel_size=(3, 1), activation='relu', input_shape=(MAX_TIMESTEPS, 1, NUM_FEATURES)),
+    MaxPooling2D(pool_size=(2, 1)),
     
     # Second Convolutional Block
-    Conv1D(filters=32, kernel_size=3, activation='relu'),
-    MaxPooling1D(pool_size=2),
-    Dropout(0.2), # Prevents overfitting
+    Conv2D(filters=32, kernel_size=(3, 1), activation='relu'),
+    MaxPooling2D(pool_size=(2, 1)),
+    Dropout(0.2),
     
     # Flatten to dense layers
     Flatten(),
