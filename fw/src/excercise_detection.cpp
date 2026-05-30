@@ -1,6 +1,7 @@
 #include "excercise_detection.h"
 
 #include "model.h"
+#include <algorithm>
 
 void ExcerciseDetection::setup() {
   loadModel();
@@ -50,64 +51,95 @@ void ExcerciseDetection::setupTensors() {
   output_zero_point = tflOutputTensor->params.zero_point;
 }
 
-void ExcerciseDetection::processNewData(const AccelerationData& accData, const GyroscopeData& gyroData) {
-  // Ensure we have matching sample counts
-  size_t num_samples = accData.samples.size();
-  if (gyroData.samples.size() != num_samples) {
-    Serial.println("Accel and Gyro sample counts mismatch!");
+void ExcerciseDetection::processNewData() {
+  // Process any buffered data when we have a full window
+  if (this->total_buffered_samples >= TARGET_SAMPLES) {
+    processWindow();
+  }
+}
+
+void ExcerciseDetection::bufferNewData(const AccelerationData& accData, const GyroscopeData& gyroData) {
+  // Store the incoming batches unchanged
+  acc_batches.push_back(accData);
+  gyro_batches.push_back(gyroData);
+
+  // Count only paired samples (min of accel/gyro per batch)
+  size_t pair_count = std::min(accData.samples.size(), gyroData.samples.size());
+  this->total_buffered_samples += pair_count;
+}
+
+void ExcerciseDetection::processWindow() {
+  if (this->total_buffered_samples < ExcerciseDetection::TARGET_SAMPLES) return; // not enough data
+
+  // Flatten oldest->newest paired samples into the model input (take exactly TARGET_SAMPLES)
+  size_t filled = 0;
+  for (size_t b = 0; b < this->acc_batches.size() && filled < TARGET_SAMPLES; ++b) {
+    size_t batch_pairs = std::min(this->acc_batches[b].samples.size(), this->gyro_batches[b].samples.size());
+    for (size_t i = 0; i < batch_pairs && filled < TARGET_SAMPLES; ++i) {
+      size_t tensor_base = filled * ExcerciseDetection::NUM_FEATURES;
+      const Axis3D& a = this->acc_batches[b].samples[i];
+      const Axis3D& g = this->gyro_batches[b].samples[i];
+      float vals[ExcerciseDetection::NUM_FEATURES] = {a.x, a.y, a.z, g.x, g.y, g.z};
+      for (size_t f = 0; f < ExcerciseDetection::NUM_FEATURES; ++f) {
+        int8_t q = static_cast<int8_t>(vals[f] / this->input_scale + this->input_zero_point);
+        this->tflInputTensor->data.int8[tensor_base + f] = q;
+      }
+      ++filled;
+    }
+  }
+
+  if (filled < TARGET_SAMPLES) {
+    // Shouldn't happen, but guard just in case
+    Serial.println("Not enough paired samples to fill window despite counter.");
     return;
   }
 
-  // Get pointer to input tensor data
-  int8_t* input_data = tflInterpreter->typed_input_tensor<int8_t>(0);
+  // run inference
+  if (this->tflInterpreter->Invoke() != kTfLiteOk) {
+    Serial.println("Inference failed!");
+    return;
+  }
 
-  // Add samples to input buffer
-  for (size_t i = 0; i < num_samples; ++i) {
-    if (current_sample_count >= TARGET_SAMPLES) {
-      // Buffer is full, run inference
-      if (tflInterpreter->Invoke() != kTfLiteOk) {
-        Serial.println("Inference failed!");
-        return;
-      }
-
-      // Process output
-      int8_t* output_data = tflInterpreter->typed_output_tensor<int8_t>(0);
-      
-      // Find the class with highest confidence
-      uint8_t best_class = 0;
-      float best_confidence = -1.0f;
-      
-      for (uint8_t c = 0; c < NUM_CLASSES; ++c) {
-        float confidence = (output_data[c] - output_zero_point) * output_scale;
-        if (confidence > best_confidence) {
-          best_confidence = confidence;
-          best_class = c;
-        }
-      }
-
-      Serial.print("Detected: ");
-      Serial.print(EXERCISES[best_class].c_str());
-      Serial.print(" (confidence: ");
-      Serial.print(best_confidence);
-      Serial.println(")");
-
-      // Reset buffer for next batch
-      current_sample_count = 0;
+  int8_t* output_data = this->tflInterpreter->typed_output_tensor<int8_t>(ExcerciseDetection::OUTPUT_TENSOR_INDEX);
+  size_t best_class = ExcerciseDetection::FIRST_CLASS_INDEX;
+  float best_confidence = ExcerciseDetection::INITIAL_BEST_CONFIDENCE;
+  for (size_t c = ExcerciseDetection::FIRST_CLASS_INDEX; c < ExcerciseDetection::NUM_CLASSES; ++c) {
+    float confidence = (output_data[c] - this->output_zero_point) * this->output_scale;
+    if (confidence > best_confidence) {
+      best_confidence = confidence;
+      best_class = c;
     }
+  }
 
-    // Quantize and store accel data
-    int offset = current_sample_count * NUM_FEATURES;
-    for (uint8_t j = 0; j < 3; ++j) {
-      const float* accel_axis = (j == 0) ? &accData.samples[i].x : (j == 1) ? &accData.samples[i].y : &accData.samples[i].z;
-      input_data[offset + j] = (*accel_axis / input_scale) + input_zero_point;
+  Serial.print("Detected: ");
+  if (best_confidence >= ExcerciseDetection::PREDICTION_CONFIDENCE_THRESHOLD) {
+    Serial.print(EXERCISE_NAMES[best_class]);
+    Serial.print(" (confidence: ");
+    Serial.print(best_confidence);
+    Serial.println(")");
+  } else {
+    Serial.print("UNKNOWN MOVEMENT (confidence: ");
+    Serial.print(best_confidence);
+    Serial.println(")");
+  }
+
+  // Trim oldest paired samples so we keep only the last TARGET_SAMPLES
+  size_t excess = (this->total_buffered_samples > TARGET_SAMPLES) ? (this->total_buffered_samples - TARGET_SAMPLES) : 0;
+  while (excess > 0 && !this->acc_batches.empty()) {
+    size_t batch_pairs = std::min(this->acc_batches.front().samples.size(), this->gyro_batches.front().samples.size());
+    if (batch_pairs <= excess) {
+      excess -= batch_pairs;
+      this->total_buffered_samples -= batch_pairs;
+      this->acc_batches.erase(this->acc_batches.begin());
+      this->gyro_batches.erase(this->gyro_batches.begin());
+    } else {
+      // remove 'excess' samples from the start of the first batch
+      this->acc_batches.front().samples.erase(this->acc_batches.front().samples.begin(),
+                                              this->acc_batches.front().samples.begin() + excess);
+      this->gyro_batches.front().samples.erase(this->gyro_batches.front().samples.begin(),
+                                              this->gyro_batches.front().samples.begin() + excess);
+      this->total_buffered_samples -= excess;
+      excess = 0;
     }
-
-    // Quantize and store gyro data
-    for (uint8_t j = 0; j < 3; ++j) {
-      const float* gyro_axis = (j == 0) ? &gyroData.samples[i].x : (j == 1) ? &gyroData.samples[i].y : &gyroData.samples[i].z;
-      input_data[offset + 3 + j] = (*gyro_axis / input_scale) + input_zero_point;
-    }
-
-    current_sample_count++;
   }
 }
