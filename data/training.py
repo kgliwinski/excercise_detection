@@ -6,6 +6,7 @@ import tensorflow as tf
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout
+from tensorflow.keras.utils import to_categorical
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import classification_report, confusion_matrix
@@ -67,6 +68,7 @@ X = np.expand_dims(X, axis=2)
 
 y = np.array(y_labels, dtype=np.int32)
 NUM_CLASSES = len(label_map)
+y = to_categorical(y, num_classes=NUM_CLASSES)
 
 print(f"\nFinal Input Shape: {X.shape} (Samples, Height, Width, Channels)")
 print(f"Classes Found: {label_map}")
@@ -91,13 +93,13 @@ model = Sequential([
     # Flatten to dense layers
     Flatten(),
     Dense(32, activation='relu'),
-    Dense(NUM_CLASSES, activation='softmax')
+    Dense(NUM_CLASSES, activation='sigmoid')
 ])
 
 model.summary()
 
 model.compile(optimizer='adam', 
-              loss='sparse_categorical_crossentropy', 
+              loss='binary_crossentropy', 
               metrics=['accuracy'])
 
 # ==========================================
@@ -149,21 +151,22 @@ print(f"Model size: {os.path.getsize(tflite_filename) / 1024:.2f} KB")
 
 print("Evaluating the original Keras Model on the Test Set...")
 
-# 1. Get the model's predictions for the test data
-# The model outputs an array of 5 probabilities for each sample. 
-# np.argmax grabs the index of the highest probability.
+# 1. Get the model's predictions
 y_pred_probs = model.predict(X_test)
 y_pred_classes = np.argmax(y_pred_probs, axis=1)
 
-# 2. Re-create our class names list in the correct order
+# ---> NEW: Convert y_test back from One-Hot to standard integers <---
+y_test_classes = np.argmax(y_test, axis=1)
+
+# 2. Re-create our class names list
 class_names = [label_map[i] for i in range(NUM_CLASSES)]
 
-# 3. Print the Text Report
+# 3. Print the Text Report (Use y_test_classes here!)
 print("\n=== Classification Report ===")
-print(classification_report(y_test, y_pred_classes, target_names=class_names))
+print(classification_report(y_test_classes, y_pred_classes, target_names=class_names))
 
-# 4. Generate the Confusion Matrix
-cm = confusion_matrix(y_test, y_pred_classes)
+# 4. Generate the Confusion Matrix (Use y_test_classes here too!)
+cm = confusion_matrix(y_test_classes, y_pred_classes)
 
 # 5. Plot it beautifully using Seaborn
 plt.figure(figsize=(10, 8))

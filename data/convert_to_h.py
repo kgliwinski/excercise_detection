@@ -1,7 +1,7 @@
 import os
 
-tflite_path = "data/exercise_cnn_quantized.tflite"
-header_path = "fw/include/model.h"
+tflite_path = "exercise_cnn_quantized.tflite"
+header_path = "../fw/include/model.h"
 
 with open(tflite_path, 'rb') as f:
     tflite_data = f.read()

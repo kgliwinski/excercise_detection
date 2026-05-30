@@ -27,7 +27,8 @@ target_exercises = [
     'Dip', 
     'Two-arm Dumbbell Curl (both arms, not alternating)',
     'Overhead Triceps Extension',
-    'Lateral Raise'
+    'Lateral Raise',
+    'Rest'
 ]
 
 # ==========================================
@@ -48,6 +49,8 @@ except NotImplementedError:
     data_single = mat73.loadmat(data_file_single_activity)
     subject_data = data_single['subject_data']
     all_activities = data_single['exerciseConstants']['activities']
+
+print(all_activities)
 
 n_participants = subject_data.shape[0]
 
