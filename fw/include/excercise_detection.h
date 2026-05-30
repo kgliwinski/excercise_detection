@@ -9,9 +9,7 @@
 #include <tensorflow/lite/schema/schema_generated.h>
 #include <tensorflow/lite/version.h>
 
-#include <array>
 #include <string>
-
 class ExcerciseDetection {
  public:
   void setup();
@@ -19,8 +17,10 @@ class ExcerciseDetection {
 
  private:
   static constexpr uint8_t NUM_CLASSES = 6;
-  static constexpr std::array<std::string, NUM_CLASSES> EXERCISES = {
-      "Bicep Curl", "Dip", "Lateral Raise", "Overhead Triceps Ext", "Rest", "Two arm dumbbell Curl"};
+
+  // Exercise class names
+  const std::array<std::string, NUM_CLASSES> EXERCISES = {"Bicep Curl",           "Dip",  "Lateral Raise",
+                                                          "Overhead Triceps Ext", "Rest", "Two arm dumbbell Curl"};
 
   // Model specifics
   static constexpr size_t TARGET_SAMPLES = 150;

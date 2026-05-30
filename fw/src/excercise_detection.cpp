@@ -98,13 +98,13 @@ void ExcerciseDetection::processNewData(const AccelerationData& accData, const G
     // Quantize and store accel data
     int offset = current_sample_count * NUM_FEATURES;
     for (uint8_t j = 0; j < 3; ++j) {
-      float* accel_axis = (j == 0) ? &accData.samples[i].x : (j == 1) ? &accData.samples[i].y : &accData.samples[i].z;
+      const float* accel_axis = (j == 0) ? &accData.samples[i].x : (j == 1) ? &accData.samples[i].y : &accData.samples[i].z;
       input_data[offset + j] = (*accel_axis / input_scale) + input_zero_point;
     }
 
     // Quantize and store gyro data
     for (uint8_t j = 0; j < 3; ++j) {
-      float* gyro_axis = (j == 0) ? &gyroData.samples[i].x : (j == 1) ? &gyroData.samples[i].y : &gyroData.samples[i].z;
+      const float* gyro_axis = (j == 0) ? &gyroData.samples[i].x : (j == 1) ? &gyroData.samples[i].y : &gyroData.samples[i].z;
       input_data[offset + 3 + j] = (*gyro_axis / input_scale) + input_zero_point;
     }
 
