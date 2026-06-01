@@ -1,7 +1,5 @@
 #include "excercise_detection.h"
 
-#include <algorithm>
-
 #include "model.h"
 
 void ExcerciseDetection::setup() {
@@ -62,29 +60,18 @@ bool ExcerciseDetection::evaluateWindow(const AccelerationData& accWindow, const
   int8_t* input_data = tflInterpreter->typed_input_tensor<int8_t>(0);
 
   // 2. Flatten and Quantize
-  auto clamp_int8 = [](int32_t v) -> int32_t {
-    if (v < -128) return -128;
-    if (v > 127) return 127;
-    return v;
-  };
-
-  auto quantize = [&](float val) -> int8_t {
-    int32_t q = static_cast<int32_t>(std::round(val / input_scale) + input_zero_point);
-    return static_cast<int8_t>(clamp_int8(q));
-  };
-
   for (size_t i = 0; i < TARGET_SAMPLES; ++i) {
     int offset = i * NUM_FEATURES;
 
     // Accel
-    input_data[offset + 0] = quantize(accWindow.samples[i].x);
-    input_data[offset + 1] = quantize(accWindow.samples[i].y);
-    input_data[offset + 2] = quantize(accWindow.samples[i].z);
+    input_data[offset + 0] = static_cast<int8_t>((accWindow.samples[i].x / input_scale) + input_zero_point);
+    input_data[offset + 1] = static_cast<int8_t>((accWindow.samples[i].y / input_scale) + input_zero_point);
+    input_data[offset + 2] = static_cast<int8_t>((accWindow.samples[i].z / input_scale) + input_zero_point);
 
     // Gyro
-    input_data[offset + 3] = quantize(gyroWindow.samples[i].x);
-    input_data[offset + 4] = quantize(gyroWindow.samples[i].y);
-    input_data[offset + 5] = quantize(gyroWindow.samples[i].z);
+    input_data[offset + 3] = static_cast<int8_t>((gyroWindow.samples[i].x / input_scale) + input_zero_point);
+    input_data[offset + 4] = static_cast<int8_t>((gyroWindow.samples[i].y / input_scale) + input_zero_point);
+    input_data[offset + 5] = static_cast<int8_t>((gyroWindow.samples[i].z / input_scale) + input_zero_point);
   }
 
   // 3. Run Inference
@@ -106,34 +93,24 @@ bool ExcerciseDetection::evaluateWindow(const AccelerationData& accWindow, const
     }
   }
 
-  // 5. Optionally log debug info
-  if (debug) {
-    Serial.println("accel_x_g,accel_y_g,accel_z_g,gyro_x_dps,gyro_y_dps,gyro_z_dps");
-    for (size_t i = 0; i < TARGET_SAMPLES; ++i) {
-      String log = String(accWindow.samples[i].x) + "," + String(accWindow.samples[i].y) + "," +
-                   String(accWindow.samples[i].z) + "," + String(gyroWindow.samples[i].x) + "," +
-                   String(gyroWindow.samples[i].y) + "," + String(gyroWindow.samples[i].z);
-      Serial.println(log);
-    }
+  // 5. Evaluate and Return
+  Serial.print("[AI] Detected: ");
+  if (best_confidence >= PREDICTION_CONFIDENCE_THRESHOLD) {
+    Serial.print(EXERCISE_NAMES[best_class]);
+    Serial.print(" (confidence: ");
+    Serial.print(best_confidence * 100);
+    Serial.println("%)");
 
-    Serial.print("[AI] Detected: ");
-    if (best_confidence >= PREDICTION_CONFIDENCE_THRESHOLD) {
-      Serial.print(EXERCISE_NAMES[best_class]);
-      Serial.print(" (confidence: ");
-      Serial.print(best_confidence * 100);
-      Serial.println("%)");
-
-      // If it's a valid exercise (not rest), tell the Monitor to flush the buffer
-      if (best_class != REST_CLASS_INDEX) {
-        return true;
-      } else {
-        return false;  // It's just rest
-      }
+    // If it's a valid exercise (not rest), tell the Monitor to flush the buffer
+    if (best_class != REST_CLASS_INDEX) {
+      return true;
     } else {
-      Serial.print("UNKNOWN (confidence: ");
-      Serial.print(best_confidence * 100);
-      Serial.println("%)");
-      return false;
+      return false;  // It's just rest
     }
+  } else {
+    Serial.print("UNKNOWN (confidence: ");
+    Serial.print(best_confidence * 100);
+    Serial.println("%)");
+    return false;
   }
 }

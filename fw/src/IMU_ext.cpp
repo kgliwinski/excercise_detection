@@ -30,7 +30,7 @@ std::tuple<AccelerationData, GyroscopeData> ImuExtension::getFullData() {
       const auto samplesCount = imu.getContinuousMode().getSamplesCount() - 1;
       auto accelSamples = imu.getContinuousMode().getAccelData();
 
-      for (size_t i = 0; i < samplesCount; ++i) {
+      for (uint16_t i = 0; i < samplesCount; ++i) {
         accelData.samples.push_back(convertAccel(accelSamples[i]));
       }
       imu.getContinuousMode().subtractAccelerationAvailable();
@@ -39,7 +39,7 @@ std::tuple<AccelerationData, GyroscopeData> ImuExtension::getFullData() {
     if (gyroAvailable) {
       const auto samplesCount = imu.getContinuousMode().getSamplesCount() - 1;
       auto gyroSamples = imu.getContinuousMode().getGyroData();
-      for (size_t i = 0; i < samplesCount; ++i) {
+      for (uint16_t i = 0; i < samplesCount; ++i) {
         gyroData.samples.push_back(convertGyro(gyroSamples[i]));
       }
       imu.getContinuousMode().subtractGyroscopeAvailable();

@@ -11,12 +11,15 @@ ExcerciseDetection detector;
 VedbaEstimation vedbaEstimator;
 ExerciseMonitor monitor(vedbaEstimator, detector);
 
-static constexpr bool dbg = true;
+static constexpr bool dbg = false;
 
 void logFullImuData(const AccelerationData& accData, const GyroscopeData& gyroData) {
   if (!dbg) {
     return;
   }
+
+  auto uptime = millis();
+  Serial.println("=== New IMU Batch @ " + String(uptime) + "ms ===");
 
   Serial.println("Accel samples: ");
   Serial.print(accData.samples.size());
@@ -62,5 +65,5 @@ void loop() {
   monitor.update(accelData, gyroData);
 
   // 3. Yield to keep buffer from overflowing
-  delay(15);
+  delay(200);
 }

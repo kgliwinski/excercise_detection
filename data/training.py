@@ -44,18 +44,13 @@ for label_idx, folder_name in enumerate(sorted(os.listdir(DATA_DIR))):
         df = pd.read_csv(file)
         
         # Extract the 6 sensor columns
-        # (Assuming columns: time_s, accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z)
         sensor_data = df.iloc[:, 1:7].values 
         
-        # Pad or Truncate to fixed length
-        length = len(sensor_data)
-        if length < MAX_TIMESTEPS:
-            # Pad with zeros at the end
-            padding = np.zeros((MAX_TIMESTEPS - length, NUM_FEATURES))
-            sensor_data = np.vstack((sensor_data, padding))
-        else:
-            # Truncate if too long
-            sensor_data = sensor_data[:MAX_TIMESTEPS, :]
+        # Guardrail: The data MUST be exactly 150 samples from the Digital Twin script
+        if len(sensor_data) != MAX_TIMESTEPS:
+            print(f"ERROR: {file} has {len(sensor_data)} samples! "
+                  "Did you extract this using the Digital Twin script?")
+            continue # Skip this corrupted file
             
         X_data.append(sensor_data)
         y_labels.append(label_idx)
@@ -93,13 +88,13 @@ model = Sequential([
     # Flatten to dense layers
     Flatten(),
     Dense(32, activation='relu'),
-    Dense(NUM_CLASSES, activation='sigmoid')
+    Dense(NUM_CLASSES, activation='softmax') # <--- Changed to Softmax
 ])
 
 model.summary()
 
 model.compile(optimizer='adam', 
-              loss='binary_crossentropy', 
+              loss='categorical_crossentropy', # <--- Changed to Categorical
               metrics=['accuracy'])
 
 # ==========================================

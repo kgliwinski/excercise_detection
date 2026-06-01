@@ -1,27 +1,19 @@
 import os
 import numpy as np
-import matplotlib.pyplot as plt
 import scipy.io as sio
 import pandas as pd
 import re
-from scipy.signal import find_peaks
-from scipy.ndimage import gaussian_filter1d
 
 # ==========================================
-# Constants and environment
+# 1. Configuration and Environment
 # ==========================================
-
 data_base_dir = 'excercise_data_release'
 output_base_dir = os.path.join(data_base_dir, 'Exported_Exercises')
 
 # This file has *only* data during exercises, already separated out by exercise.
 data_file_single_activity = os.path.join(data_base_dir, 'exercise_data.50.0000_singleonly.mat')
 
-# This file has data from complete exercise sessions, including non-exercise time.
-data_file_multi_activity = os.path.join(data_base_dir, 'exercise_data.50.0000_multionly.mat')
-
-# Put the EXACT names of the 5 exercises you want here (without the "04 | " numbers)
-# Replace these examples with the actual strings printed from your header script
+# The EXACT names of the exercises you want
 target_exercises = [
     'Bicep Curl', 
     'Dip', 
@@ -31,36 +23,59 @@ target_exercises = [
     'Rest'
 ]
 
+# --- Digital Twin Constants ---
+TARGET_SAMPLES = 150
+VEDBA_THRESHOLD = 0.08
+EMA_ALPHA = 0.1
+
 # ==========================================
-# 2. Load the Dataset
+# 2. Digital Twin: VeDBA Calculator
+# ==========================================
+def calculate_vedba(accel_data, alpha):
+    """
+    Perfectly mimics the C++ Exponential Moving Average (EMA) gravity filter.
+    accel_data is expected to be an (N, 3) numpy array (X, Y, Z).
+    """
+    vedba = np.zeros(len(accel_data))
+    grav_x, grav_y, grav_z = 0.0, 0.0, 1.0 # Assuming 1G resting on Z
+    
+    for i in range(len(accel_data)):
+        ax, ay, az = accel_data[i, 0], accel_data[i, 1], accel_data[i, 2]
+        
+        # 1. Update Gravity Low-Pass Filter (EMA)
+        grav_x = (alpha * ax) + ((1.0 - alpha) * grav_x)
+        grav_y = (alpha * ay) + ((1.0 - alpha) * grav_y)
+        grav_z = (alpha * az) + ((1.0 - alpha) * grav_z)
+        
+        # 2. Isolate pure kinetic movement
+        dba_x = ax - grav_x
+        dba_y = ay - grav_y
+        dba_z = az - grav_z
+        
+        # 3. Calculate 3D Magnitude
+        vedba[i] = np.sqrt((dba_x**2) + (dba_y**2) + (dba_z**2))
+        
+    return vedba
+
+# ==========================================
+# 3. Load the Dataset
 # ==========================================
 print("Loading dataset...")
 try:
     data_single = sio.loadmat(data_file_single_activity, squeeze_me=True, struct_as_record=False)
     subject_data = data_single['subject_data']
-    
-    # Extract the activities list
     activities_array = data_single['exerciseConstants'].activities
     all_activities = [str(act) for act in activities_array]
-    
 except NotImplementedError:
-    # Fallback for massive v7.3 files
     import mat73
     data_single = mat73.loadmat(data_file_single_activity)
     subject_data = data_single['subject_data']
     all_activities = data_single['exerciseConstants']['activities']
 
-print(all_activities)
-
 n_participants = subject_data.shape[0]
 
-def print_all_excercises():
-    print("Available exercises in the dataset:")
-    for idx, act in enumerate(all_activities):
-        print(f"  {idx+1:02d} | {act}")
-
 # ==========================================
-# 3. Process and Save Repetitions
+# 4. Process and Save Repetitions
 # ==========================================
 print(f"\nExtracting and splitting data into {output_base_dir}...\n")
 
@@ -86,71 +101,69 @@ for exercise_name in target_exercises:
     for subj_idx in range(n_participants):
         recs = subject_data[subj_idx, ex_idx]
         
-        # Skip if subject didn't do this exercise
         if isinstance(recs, float) and np.isnan(recs):
             continue
             
         if not isinstance(recs, (list, np.ndarray)):
             recs = [recs]
             
-        # Extract each recording (visit) for this subject
         for rec_num, rec in enumerate(recs, start=1):
             accel = rec.data.accelDataMatrix
             gyro = rec.data.gyroDataMatrix
             
             min_len = min(accel.shape[0], gyro.shape[0])
             
-            # Stack the core data: [Time, Accel X-Y-Z, Gyro X-Y-Z]
             combined_data = np.column_stack((
-                accel[:min_len, 0],    
-                accel[:min_len, 1:4],  
-                gyro[:min_len, 1:4]    
+                accel[:min_len, 0],    # Time
+                accel[:min_len, 1:4],  # Accel X, Y, Z
+                gyro[:min_len, 1:4]    # Gyro X, Y, Z
             ))
             
-            # --- UPGRADED PEAK DETECTION (Repetition Splitting) ---
-            # 1. Calculate raw magnitude
-            accel_mag = np.sqrt(combined_data[:, 1]**2 + combined_data[:, 2]**2 + combined_data[:, 3]**2)
-            
-            # 2. Smooth the signal to remove twitchy sensor noise (sigma=3 works well for 50Hz)
-            smoothed_mag = gaussian_filter1d(accel_mag, sigma=3)
-            
-            # 3. Invert to find valleys
-            inverted_mag = smoothed_mag * -1
-            
-            # 4. Smarter Peak Finding
-            # - distance=50: reps are still min 1 second apart
-            # - prominence=0.15: Requires a more distinct valley
-            # - height=-1.2: The magnitude MUST drop back down near 1.0g (gravity) to count as a rest.
-            #   (Because it's inverted, we look for values > -1.2)
-            peaks, _ = find_peaks(inverted_mag, distance=50, prominence=0.15, height=-1.2)
-            
-            # If no clear reps are found, save the whole recording as "rep 1"
-            if len(peaks) < 2:
-                # Zero out the time
-                combined_data[:, 0] = combined_data[:, 0] - combined_data[0, 0]
+            rep_end_indices = []
+
+            # =========================================================
+            # STRATEGY A: THE REST CLASS (Bypass Watchdog)
+            # =========================================================
+            if clean_ex_name.lower() == 'rest':
+                # Just chop the resting data into sequential 150-sample chunks
+                for i in range(TARGET_SAMPLES, len(combined_data), TARGET_SAMPLES):
+                    rep_end_indices.append(i)
+                    
+            # =========================================================
+            # STRATEGY B: ACTIVE EXERCISES (Digital Twin Watchdog)
+            # =========================================================
+            else:
+                vedba_array = calculate_vedba(combined_data[:, 1:4], EMA_ALPHA)
+                state = 'RESTING'
                 
-                filename = f"subject_{subj_idx+1:03d}_rec_{rec_num:02d}_rep_01_fallback.csv"
-                filepath = os.path.join(ex_dir, filename)
-                np.savetxt(filepath, combined_data, delimiter=',', header=csv_header, comments='', fmt='%.6f')
+                for i, vedba_val in enumerate(vedba_array):
+                    if state == 'RESTING':
+                        if vedba_val > VEDBA_THRESHOLD:
+                            state = 'ACTIVE'
+                            
+                    elif state == 'ACTIVE':
+                        if vedba_val < VEDBA_THRESHOLD:
+                            state = 'RESTING'
+                            # Ensure we have a full 150-sample history to grab
+                            if i >= TARGET_SAMPLES:
+                                # Debounce: Prevent micro-twitches at the bottom from triggering 5 reps
+                                if not rep_end_indices or (i - rep_end_indices[-1] > TARGET_SAMPLES):
+                                    rep_end_indices.append(i)
+
+            # =========================================================
+            # EXTRACT & SAVE
+            # =========================================================
+            for i, end_idx in enumerate(rep_end_indices):
+                start_idx = end_idx - TARGET_SAMPLES
                 
-                total_reps_saved += 1
-                exercise_rep_count += 1
-                continue
-                
-            # If peaks are found, slice into individual reps
-            for i in range(len(peaks) - 1):
-                start_idx = peaks[i]
-                end_idx = peaks[i+1]
-                
-                # Copy the slice so we don't modify the original array
+                # Grab the exact 150-sample window
                 rep_data = combined_data[start_idx:end_idx, :].copy()
                 
-                # Reset time to start at 0.0 seconds
-                rep_data[:, 0] = rep_data[:, 0] - rep_data[0, 0]
+                # Synthetic time generation: Reset to 0.0s, step by 0.02s (50Hz)
+                rep_data[:, 0] = np.arange(0, TARGET_SAMPLES) * 0.02
                 
                 # Save the individual repetition
-                rep_num = i + 1
-                filename = f"subject_{subj_idx+1:03d}_rec_{rec_num:02d}_rep_{rep_num:02d}.csv"
+                filename = f"subject_{subj_idx+1:03d}_rec_{rec_num:02d}_rep_{i+1:02d}.csv"
                 filepath = os.path.join(ex_dir, filename)
                 
                 np.savetxt(filepath, rep_data, delimiter=',', header=csv_header, comments='', fmt='%.6f')
@@ -158,7 +171,7 @@ for exercise_name in target_exercises:
                 total_reps_saved += 1
                 exercise_rep_count += 1
                 
-    print(f"  -> Extracted {exercise_rep_count} individual reps for '{exercise_name}'")
+    print(f"  -> Extracted {exercise_rep_count} hardware-aligned reps for '{exercise_name}'")
 
 print("\n=== Pipeline Complete ===")
-print(f"Total individual repetition files saved: {total_reps_saved}")
+print(f"Total fixed-length (150-sample) repetition files saved: {total_reps_saved}")

@@ -3,12 +3,11 @@
 #include "motion_types.h"
 #include "vedba_estimation.h"
 #include "excercise_detection.h"
-
-enum class SystemState { IDLE, RECORDING };
+#include "running_window_buffer.h"
 
 class ExerciseMonitor {
 public:
-    // Pass our sub-modules in by reference so this class can coordinate them
+    // Inject our DSP and AI modules so the Monitor can orchestrate them
     ExerciseMonitor(VedbaEstimation& estimator, ExcerciseDetection& detector);
     
     void setup();
@@ -17,8 +16,5 @@ public:
 private:
     VedbaEstimation& vedbaEstimator;
     ExcerciseDetection& aiDetector;
-    
-    SystemState currentState;
-    size_t samples_recorded;
-    static constexpr size_t TARGET_SAMPLES = 150;
+    RunningWindowBuffer windowBuffer; // The sliding window lives inside the monitor
 };
