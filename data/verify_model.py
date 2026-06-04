@@ -19,7 +19,7 @@ DATA_DIR = "extracted_reps"
 #     "Overhead Triceps Ext", "Rest", "Two arm dumbbell Curl"
 # ]
 CLASS_NAMES = [
-    "Bicep Curl", "Rest"
+    "Rest", "Bicep Curl"
 ]
 
 # ==========================================
